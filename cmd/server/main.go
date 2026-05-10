@@ -168,7 +168,7 @@ func loadConfig() config {
 		GoogleCredentialsJSON: os.Getenv("GOOGLE_CREDENTIALS_JSON"),
 		EnableChangeSends:     envBool("ENABLE_CHANGE_SENDS", true),
 		WatchTab:              env("WATCH_TAB", "BAU Backlogs Summary"),
-		WatchCell:             env("WATCH_CELL", "F8"),
+		WatchCell:             env("WATCH_CELL", "G8"),
 		WatchPollSeconds:      envInt("WATCH_POLL_SECONDS", 5),
 		ChangeSettleSeconds:   envInt("CHANGE_SETTLE_SECONDS", 5),
 		ReportTab:             env("REPORT_TAB", "BAU Backlogs Summary"),
