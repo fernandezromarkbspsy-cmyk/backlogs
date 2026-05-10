@@ -65,17 +65,19 @@ curl -X POST https://your-public-host/admin/test-report \
   -H "Authorization: Bearer your-admin-token"
 ```
 
-## Deploy On Azure
+## Deploy On Render
 
-Use [AZURE_DEPLOYMENT.md](AZURE_DEPLOYMENT.md) to deploy the Docker server to Azure App Service for Linux with Azure Container Registry.
+Use [RENDER_DEPLOYMENT.md](RENDER_DEPLOYMENT.md) to deploy the Docker server to Render.
 
-After deployment, use the Azure App Service URL:
+After deployment, use the Render service URL:
 
 ```text
-https://your-webapp-name.azurewebsites.net/healthz
-https://your-webapp-name.azurewebsites.net/seatalk/callback
-https://your-webapp-name.azurewebsites.net/admin/test-report
+https://your-app.onrender.com/healthz
+https://your-app.onrender.com/seatalk/callback
+https://your-app.onrender.com/admin/test-report
 ```
+
+For the free tier, use UptimeRobot to ping `/healthz` every 5 minutes to keep the service awake.
 
 ## Group ID Handling
 

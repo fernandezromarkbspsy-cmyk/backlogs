@@ -228,44 +228,65 @@ func (a *app) handleAdminTestReport(w http.ResponseWriter, r *http.Request) {
 func (a *app) handleSeaTalkCallback(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err != nil {
+		log.Printf("callback: invalid body: %v", err)
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
+	log.Printf("callback: received event, signature=%s", r.Header.Get("Signature"))
+
 	if a.cfg.SeaTalkSigningSecret != "" && !validSeaTalkSignature(body, a.cfg.SeaTalkSigningSecret, r.Header.Get("Signature")) {
+		log.Printf("callback: invalid signature")
 		http.Error(w, "invalid signature", http.StatusUnauthorized)
 		return
 	}
 
 	var envelope callbackEnvelope
 	if err := json.Unmarshal(body, &envelope); err != nil {
+		log.Printf("callback: invalid json: %v", err)
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
 
+	log.Printf("callback: event_type=%s, event_id=%s", envelope.EventType, envelope.EventID)
+
 	switch envelope.EventType {
 	case eventVerification:
+		log.Printf("callback: handling event_verification")
 		writeJSON(w, http.StatusOK, envelope.Event)
 	case eventBotAddedToGroup:
+		log.Printf("callback: handling bot_added_to_group_chat")
 		var event groupEvent
 		if err := json.Unmarshal(envelope.Event, &event); err == nil && event.Group.GroupID != "" {
+			log.Printf("callback: adding group_id=%s", event.Group.GroupID)
 			go func() {
 				if err := a.addGroupID(context.Background(), event.Group.GroupID); err != nil {
 					log.Printf("add group %s: %v", event.Group.GroupID, err)
+				} else {
+					log.Printf("add group %s: success", event.Group.GroupID)
 				}
 			}()
+		} else {
+			log.Printf("callback: failed to parse bot_added_to_group_chat event: %v", err)
 		}
 		w.WriteHeader(http.StatusOK)
 	case eventBotRemovedFromGroup:
+		log.Printf("callback: handling bot_removed_from_group_chat")
 		var event groupEvent
 		if err := json.Unmarshal(envelope.Event, &event); err == nil && event.Group.GroupID != "" {
+			log.Printf("callback: removing group_id=%s", event.Group.GroupID)
 			go func() {
 				if err := a.removeGroupID(context.Background(), event.Group.GroupID); err != nil {
 					log.Printf("remove group %s: %v", event.Group.GroupID, err)
+				} else {
+					log.Printf("remove group %s: success", event.Group.GroupID)
 				}
 			}()
+		} else {
+			log.Printf("callback: failed to parse bot_removed_from_group_chat event: %v", err)
 		}
 		w.WriteHeader(http.StatusOK)
 	default:
+		log.Printf("callback: unhandled event_type=%s", envelope.EventType)
 		w.WriteHeader(http.StatusOK)
 	}
 }
@@ -377,43 +398,37 @@ func (a *app) interactiveReportCard(ctx context.Context) (interactiveCard, error
 		spreadsheetID = a.cfg.SpreadsheetID
 	}
 
-	resp, err := a.sheets.Spreadsheets.Values.BatchGet(spreadsheetID).
-		Ranges(a.cfg.CardDescriptionRange).
-		Ranges(a.cfg.CardPendingCell).
-		Ranges(a.cfg.CardAverageWTCell).
+	// Read from BAU Backlogs Summary!B2 and B3 for pending and average wait time
+	resp, err := a.sheets.Spreadsheets.Values.BatchGet(a.cfg.SpreadsheetID).
+		Ranges("BAU Backlogs Summary!B2").
+		Ranges("BAU Backlogs Summary!B3").
 		Context(ctx).
 		Do()
 	if err != nil {
 		return interactiveCard{}, err
 	}
 
-	var descriptionLines []string
 	pending := ""
 	averageWT := ""
 	if len(resp.ValueRanges) > 0 {
-		descriptionLines = flattenValues(resp.ValueRanges[0].Values)
+		pending = firstValue(resp.ValueRanges[0].Values)
 	}
 	if len(resp.ValueRanges) > 1 {
-		pending = firstValue(resp.ValueRanges[1].Values)
-	}
-	if len(resp.ValueRanges) > 2 {
-		averageWT = firstValue(resp.ValueRanges[2].Values)
+		averageWT = firstValue(resp.ValueRanges[1].Values)
 	}
 
-	parts := []string{`<mention-tag target="seatalk://user?id=0"/>`}
-	parts = append(parts, descriptionLines...)
-	parts = append(parts,
-		"**Followup Request:**",
-		fmt.Sprintf("- Pending: %s", pending),
-		fmt.Sprintf("- Ave. WT: %s", averageWT),
-	)
+	parts := []string{
+		"**Pending Request + WT:**",
+		fmt.Sprintf("Pending = %s", pending),
+		fmt.Sprintf("Ave. WT: = %s", averageWT),
+	}
 
 	loc, err := time.LoadLocation(a.cfg.Timezone)
 	if err != nil {
 		loc = time.Local
 	}
 	return interactiveCard{
-		Title:       "Outbound Pending for Dispatch as of " + time.Now().In(loc).Format("3:04PM Jan-02"),
+		Title:       `<mention-tag target="seatalk://user?id=0"/>` + " Outbound Pending for Dispatch as of " + time.Now().In(loc).Format("3:04PM Jan-02"),
 		Description: strings.Join(nonEmpty(parts), "\n"),
 		ReportLink:  a.cfg.CardReportLink,
 	}, nil
@@ -496,7 +511,7 @@ func (s *seaTalkClient) SendInteractiveUpdate(ctx context.Context, groupID strin
 	}
 	elements = append(elements, map[string]any{"element_type": "button", "button": map[string]any{
 		"button_type": "redirect",
-		"text":        "Open report",
+		"text":        "View Report Link",
 		"mobile_link": map[string]string{
 			"type": "web",
 			"path": card.ReportLink,
@@ -589,15 +604,27 @@ func (r *reportRenderer) RenderPNG(ctx context.Context) ([]byte, error) {
 	if _, err := os.Stat(singleFilePath); err == nil {
 		pngPath = singleFilePath
 	}
+	// Add 1-inch margins on all sides (1 inch = DPI pixels) without trimming
+	marginPixels := r.cfg.PNGDPI
+	marginedPath := filepath.Join(dir, "report-margined.png")
+
+	// Add 1-inch margins on all sides
+	if err := run(ctx, "magick", pngPath, "-border", fmt.Sprintf("%dx%d", marginPixels, marginPixels), "-bordercolor", "white", marginedPath); err != nil {
+		if err := run(ctx, "convert", pngPath, "-border", fmt.Sprintf("%dx%d", marginPixels, marginPixels), "-bordercolor", "white", marginedPath); err != nil {
+			return nil, err
+		}
+	}
+
+	// Resize if max width is specified
 	if r.cfg.PNGMaxWidth > 0 {
-		if err := run(ctx, "magick", pngPath, "-resize", fmt.Sprintf("%dx>", r.cfg.PNGMaxWidth), finalPath); err != nil {
-			if err := run(ctx, "convert", pngPath, "-resize", fmt.Sprintf("%dx>", r.cfg.PNGMaxWidth), finalPath); err != nil {
+		if err := run(ctx, "magick", marginedPath, "-resize", fmt.Sprintf("%dx>", r.cfg.PNGMaxWidth), finalPath); err != nil {
+			if err := run(ctx, "convert", marginedPath, "-resize", fmt.Sprintf("%dx>", r.cfg.PNGMaxWidth), finalPath); err != nil {
 				return nil, err
 			}
 		}
 		return os.ReadFile(finalPath)
 	}
-	return os.ReadFile(pngPath)
+	return os.ReadFile(marginedPath)
 }
 
 func (r *reportRenderer) exportPDF(ctx context.Context) ([]byte, error) {
