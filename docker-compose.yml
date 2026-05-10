@@ -1,0 +1,11 @@
+services:
+  seatalk-bot:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/google-service-account.json
+    volumes:
+      - ./google-service-account.json:/run/secrets/google-service-account.json:ro
