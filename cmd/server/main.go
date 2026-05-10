@@ -95,10 +95,6 @@ type callbackEnvelope struct {
 	Event     json.RawMessage `json:"event"`
 }
 
-type verificationEvent struct {
-	Challenge string `json:"seatalk_challenge"`
-}
-
 type groupEvent struct {
 	Group struct {
 		GroupID string `json:"group_id"`
@@ -248,12 +244,7 @@ func (a *app) handleSeaTalkCallback(w http.ResponseWriter, r *http.Request) {
 
 	switch envelope.EventType {
 	case eventVerification:
-		var event verificationEvent
-		if err := json.Unmarshal(envelope.Event, &event); err != nil {
-			http.Error(w, "invalid verification event", http.StatusBadRequest)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"seatalk_challenge": event.Challenge})
+		writeJSON(w, http.StatusOK, envelope.Event)
 	case eventBotAddedToGroup:
 		var event groupEvent
 		if err := json.Unmarshal(envelope.Event, &event); err == nil && event.Group.GroupID != "" {
