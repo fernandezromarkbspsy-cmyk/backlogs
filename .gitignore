@@ -1,0 +1,7 @@
+.env
+google-service-account.json
+*.exe
+
+.gocache/
+.gomodcache/
+run/
