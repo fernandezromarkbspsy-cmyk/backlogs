@@ -117,7 +117,7 @@ If you cannot run Docker locally, use Azure Container Registry Tasks to build di
 ```powershell
 # Build and push image directly to ACR without local Docker
 az acr build `
-  --registry <your-acr-name> `
+  --registry acrseatalkbacklogs `
   --image seatalk-backlogs-bot:v1 `
   --file Dockerfile `
   .
